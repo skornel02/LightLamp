@@ -30,6 +30,9 @@ int timeTargetSunday = 0;
 
 int loopTick = 0;
 
+bool lampEnabled = false;
+int lampBrightness = 75;
+
 int currentTimeMoment()
 {
 	timeClient.update();
@@ -38,6 +41,19 @@ int currentTimeMoment()
 	int sec = timeClient.getSeconds();
 
 	return hour + minute + sec;
+}
+
+void changeLEDWithPercentage(int percentage)
+{
+	if (percentage < 0 || percentage > 100)
+		return;
+
+	int realLevel = (((double)percentage / 100) * 255);
+	analogWrite(4, realLevel);
+	Serial.print("Setting LED to percentage: ");
+	Serial.print(percentage);
+	Serial.print("% digital: ");
+	Serial.println(realLevel);
 }
 
 int nextAlarm()
@@ -67,7 +83,8 @@ int nextAlarm()
 
 void handleRoot()
 {
-	server.send(202, "text/plain", "self-destruction confirmed...");
+	const char *destructionMessage = R""""(Self-destruction started...)"""";
+	server.send(202, "text/plain", destructionMessage);
 }
 
 void handle404()
@@ -157,9 +174,15 @@ void handleStatus()
 	message += "</head>";
 
 	message += "<body>";
-	message += "<table class=\"table\">";
-	message += "<caption>Alarms </caption>";
 
+	message += "<h1>Lamp</h1>";
+	message += "<form action=\"/toggle_lamp\">";
+	message += "<input type=\"submit\" class=\"btn btn-warning\" style=\"display: block; margin: auto;\" value=\"";
+	message += lampEnabled ? "Turn light off" : "Turn light on";
+	message += "\"></form>";
+
+	message += "<h1>Alarms</h1>";
+	message += "<table class=\"table\">";
 	message += "<thead>";
 	message += "<tr>";
 	message += "<th>Day</th>";
@@ -183,7 +206,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"1\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -201,7 +224,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"2\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -219,7 +242,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"3\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -237,7 +260,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"4\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -255,7 +278,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"5\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -273,7 +296,7 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"6\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 
@@ -291,28 +314,42 @@ void handleStatus()
 	message += "<form action=\"/update_clock\">";
 	message += "<input type=\"hidden\" name=\"day\" value=\"7\">";
 	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\"></form>";
+	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
 	message += "</td>";
 	message += "</tr>";
 	message += "</tbody>";
 
 	message += "</table>";
 
-	message += "<h1>Today</h1>";
+	message += "<h1>Status</h1>";
 
-	message += "<p>Time: ";
+	message += "<table class=\"table\">";
+	message += "<thead>";
+	message += "<tr>";
+	message += "<th>Time</th>";
+	message += "<th>Alarm at</th>";
+	message += "<th>Time remaining</th>";
+	message += "</tr>";
+	message += "</thead>";
+
+	message += "<tbody>";
+	message += "<tr>";
+
+	message += "<td>";
 	message += timeClient.getFormattedTime();
-	message += "</p>";
-
-	message += "<p> Alarm at:";
+	message += "</td>";
+	message += "<td>";
 	message += nextAlarm() / 3600;
 	message += ":";
 	message += (nextAlarm() % 3600) / 60;
-	message += "</p>";
-
-	message += "<p> Time remaining:";
+	message += "</td>";
+	message += "<td>";
 	message += nextAlarm() - currentTimeMoment();
-	message += "</p>";
+	message += "</td>";
+
+	message += "</tr>";
+	message += "</tbody>";
+	message += "</table>";
 
 	message += "</body>";
 	message += "</html>";
@@ -391,6 +428,12 @@ void handleUpdateTime()
 	server.send(301);
 }
 
+void handleToggleLamp(){
+	lampEnabled = !lampEnabled;
+	server.sendHeader("Location", "/status");
+	server.send(301);
+}
+
 void setup(void)
 {
 	Serial.begin(9600);
@@ -426,6 +469,7 @@ void setup(void)
 
 	server.on("/debug", handleDebug);
 	server.on("/update_clock", handleUpdateTime);
+	server.on("/toggle_lamp", handleToggleLamp);
 	server.on("/status", handleStatus);
 
 	server.onNotFound(handle404);
@@ -461,8 +505,10 @@ void tickLight()
 		int difference = alarm - currentTimeMoment();
 		if (difference >= 0 && difference < 1800)
 		{
-			int value = (255 - (difference / 8.5)) - 40;
-			analogWrite(4, value);
+			//maximum: 85%
+			//minimum: 0.1%
+			int value = 85 - (difference / 21.2);
+			changeLEDWithPercentage(value);
 
 			Serial.print("Waking up in ");
 			Serial.print(difference);
@@ -471,8 +517,10 @@ void tickLight()
 		}
 		else if (difference >= -300 && difference < 0)
 		{
-			int value = 215 - difference * -1 * 0.7;
-			analogWrite(4, value);
+			//Max: 84.3%
+			//Min: -0.7% techinally, but in reallity, 0.2%
+			int value = 85 + (difference / 3.5);
+			changeLEDWithPercentage(value);
 			Serial.print("You have will have been already waken up in ");
 			Serial.print(difference);
 			Serial.print("... dim: ");
@@ -484,9 +532,18 @@ void tickLight()
 			Serial.print(difference > 0 ? difference - 1800 : difference);
 			Serial.println(")... idling");
 
-			analogWrite(4, 0);
+			changeLEDWithPercentage(0);
 		}
 	}
+}
+
+bool tickLamp()
+{
+	if(lampEnabled){
+		changeLEDWithPercentage(lampBrightness);
+		Serial.println("Lamp feature on!");
+	}
+	return lampEnabled;
 }
 
 void loop(void)
@@ -496,7 +553,8 @@ void loop(void)
 	loopTick = (loopTick + 1) % 10;
 	if (loopTick == 0)
 	{
-		tickLight();
+		if (!tickLamp())
+			tickLight();
 	}
 
 	delay(100);

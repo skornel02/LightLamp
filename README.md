@@ -25,6 +25,6 @@ Written using parts of Bootstrap.
 
 ## Future plans:
  
-- Normal lamp function
+- ~~Normal lamp function~~
 - Controlling buttons
 - Google Assistant support
