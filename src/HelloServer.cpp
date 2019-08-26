@@ -12,12 +12,17 @@ const char *auth_password = "password";
 
 const char *device_name = "LightLamp";
 
-const char *ntp_address = "0.hu.pool.ntp.org";
-const int timezone_offset = 2 * 3600;
+const char *ntp_address = "europe.pool.ntp.org";
+const int timezone_offset = 2;
+
+const IPAddress local_IP(192, 168, 0, 110);
+const IPAddress gateway(192, 168, 0, 1);
+const IPAddress subnet(255, 255, 255, 0);
+const IPAddress dns1(8, 8, 8, 8);
 
 ESP8266WebServer server(80);
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, ntp_address, timezone_offset);
+NTPClient timeClient(ntpUDP, ntp_address, timezone_offset * 3600);
 
 //TIMES
 int timeTargetMonday = 0;
@@ -32,6 +37,8 @@ int loopTick = 0;
 
 bool lampEnabled = false;
 int lampBrightness = 75;
+
+int wifiRestarter = 0;
 
 int currentTimeMoment()
 {
@@ -79,83 +86,6 @@ int nextAlarm()
 		Serial.println("ERROR!!! Day is not between 0-6");
 		return 0;
 	}
-}
-
-void handleRoot()
-{
-	const char *destructionMessage = R""""(Self-destruction started...)"""";
-	server.send(202, "text/plain", destructionMessage);
-}
-
-void handle404()
-{
-	String message = "Path not found!\n\n";
-	message += "URI: ";
-	message += server.uri();
-	message += "\nMethod: ";
-	message += (server.method() == HTTP_GET) ? "GET" : "POST";
-	message += "\nArguments: ";
-	message += server.args();
-	message += "\n";
-	for (uint8_t i = 0; i < server.args(); i++)
-	{
-		message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
-	}
-	server.send(404, "text/plain", message);
-}
-
-void handleDebug()
-{
-	if (!server.authenticate(auth_username, auth_password))
-	{
-		return server.requestAuthentication();
-	}
-
-	String message = "<html>";
-	message += "<head>";
-	message += "<title>Debug?</title>";
-	message += "</head>";
-
-	message += "<body>";
-
-	message += "<h1>Debug information of request</h1>";
-
-	message += "<p>Time: ";
-	message += timeClient.getFormattedTime();
-	message += "</p>";
-
-	message += "<p>URI: ";
-	message += server.uri();
-	message += "</p>";
-
-	message += "<p>Method: ";
-	message += (server.method() == HTTP_GET) ? "GET" : "POST";
-	message += "</p>";
-
-	message += "<p>Arguments: ";
-	message += server.args();
-	message += "</p>";
-	message += "<ul>";
-	for (uint8_t i = 0; i < server.args(); i++)
-	{
-		message += "<li> " + server.argName(i) + ": " + server.arg(i) + " </li>";
-	}
-	message += "</ul>";
-
-	message += "<p>Headers: ";
-	message += server.headers();
-	message += "</p>";
-	message += "<ul>";
-	for (uint8_t i = 0; i < server.headers(); i++)
-	{
-		message += "<li> " + server.headerName(i) + ": " + server.header(i) + " </li>";
-	}
-	message += "</ul>";
-
-	message += "</body>";
-	message += "</html>";
-
-	server.send(200, "text/html", message);
 }
 
 void handleStatus()
@@ -428,23 +358,28 @@ void handleUpdateTime()
 	server.send(301);
 }
 
-void handleToggleLamp(){
+void handleToggleLamp()
+{
+	Serial.println("Swapping lamp status");
 	lampEnabled = !lampEnabled;
 	server.sendHeader("Location", "/status");
-	server.send(301);
+	server.send(307);
 }
 
-void setup(void)
+void startWifi()
 {
-	Serial.begin(9600);
+	Serial.println("Enabling wifi...");
+	WiFi.begin(wifi_ssid, wifi_password);
+
+	if (!WiFi.config(local_IP, gateway, subnet, dns1))
+	{
+		Serial.println("STA Failed to configure");
+	}
 
 	WiFi.mode(WIFI_STA);
 	WiFi.hostname(device_name);
-	WiFi.begin(wifi_ssid, wifi_password);
 
-	Serial.println("");
-
-	// Wait for connection
+		// Wait for connection
 	while (WiFi.status() != WL_CONNECTED)
 	{
 		delay(500);
@@ -456,28 +391,33 @@ void setup(void)
 	Serial.print("IP address: ");
 	Serial.println(WiFi.localIP());
 
-	if (MDNS.begin("esp8266"))
+	if (MDNS.begin("lightlamp"))
 	{
 		Serial.println("MDNS responder started");
 	}
+}
 
-	server.on("/", handleRoot);
+void stopWifi()
+{
+	Serial.println("Disabling wifi...");
+	WiFi.mode(WIFI_OFF);
+}
 
-	server.on("/inline", []() {
-		server.send(200, "text/plain", "this works as well");
-	});
+void setup(void)
+{
+	Serial.begin(9600);
+	Serial.println("");
 
-	server.on("/debug", handleDebug);
+	startWifi();
+
 	server.on("/update_clock", handleUpdateTime);
 	server.on("/toggle_lamp", handleToggleLamp);
 	server.on("/status", handleStatus);
 
-	server.onNotFound(handle404);
-
 	server.begin();
 	Serial.println("HTTP server started");
 
-	timeClient.begin();
+		timeClient.begin();
 	Serial.println("Time client started");
 
 	timeClient.update();
@@ -499,6 +439,7 @@ void tickLight()
 	if (alarm == 0)
 	{
 		Serial.println("No alarm for today!");
+		changeLEDWithPercentage(0);
 	}
 	else
 	{
@@ -539,7 +480,8 @@ void tickLight()
 
 bool tickLamp()
 {
-	if(lampEnabled){
+	if (lampEnabled)
+	{
 		changeLEDWithPercentage(lampBrightness);
 		Serial.println("Lamp feature on!");
 	}
@@ -548,14 +490,25 @@ bool tickLamp()
 
 void loop(void)
 {
+	wifiRestarter++;
+
 	server.handleClient();
 
-	loopTick = (loopTick + 1) % 10;
+	loopTick = (loopTick + 1) % 100;
 	if (loopTick == 0)
 	{
+		timeClient.update();
 		if (!tickLamp())
 			tickLight();
 	}
 
-	delay(100);
+	if (wifiRestarter > 43200000)
+	{
+		wifiRestarter = 0;
+		stopWifi();
+		delay(500);
+		startWifi();
+	}
+
+	delay(10);
 }
