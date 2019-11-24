@@ -5,15 +5,15 @@
 #include <NTPClient.h>
 
 const char *wifi_ssid = "ssid";
-const char *wifi_password = "password";
+const char *wifi_password = "pass";
 
 const char *auth_username = "username";
-const char *auth_password = "password";
+const char *auth_password = "userpass";
 
 const char *device_name = "LightLamp";
 
 const char *ntp_address = "europe.pool.ntp.org";
-const int timezone_offset = 2;
+const int timezone_offset = 1;
 
 const IPAddress local_IP(192, 168, 0, 110);
 const IPAddress gateway(192, 168, 0, 1);
@@ -24,14 +24,8 @@ ESP8266WebServer server(80);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntp_address, timezone_offset * 3600);
 
-//TIMES
-int timeTargetMonday = 0;
-int timeTargetTuesday = 0;
-int timeTargetWednesday = 0;
-int timeTargetThursday = 0;
-int timeTargetFriday = 0;
-int timeTargetSaturday = 0;
-int timeTargetSunday = 0;
+//TIMESv2
+int timeTargets[7];
 
 int loopTick = 0;
 
@@ -66,25 +60,50 @@ void changeLEDWithPercentage(int percentage)
 int nextAlarm()
 {
 	timeClient.update();
-	switch (timeClient.getDay())
+	return timeTargets[timeClient.getDay()];
+}
+
+String formatTime(int time)
+{
+	String timeStr = "";
+	if(time != 0)
 	{
-	case 1:
-		return timeTargetMonday;
-	case 2:
-		return timeTargetTuesday;
-	case 3:
-		return timeTargetWednesday;
-	case 4:
-		return timeTargetThursday;
-	case 5:
-		return timeTargetFriday;
-	case 6:
-		return timeTargetSaturday;
-	case 0:
-		return timeTargetSunday;
-	default:
-		Serial.println("ERROR!!! Day is not between 0-6");
-		return 0;
+	int hour = time / 3600;
+	int minute = (time % 3600) / 60;
+	timeStr += hour < 10 ? "0" : "";
+	timeStr += hour;
+	timeStr += ":";
+	timeStr += minute < 10 ? "0" : "";
+	timeStr += minute;
+	}
+	else 
+	{
+		timeStr = "--:--";
+	}
+	
+	return timeStr;
+}
+
+String formatDay(int day)
+{
+	switch (day)
+	{
+		case 0:
+			return "Sunday";
+		case 1:
+			return "Monday";
+		case 2:
+			return "Tuesday";
+		case 3:
+			return "Wednesday";
+		case 4:
+			return "Thursday";
+		case 5:
+			return "Friday";
+		case 6:
+			return "Saturday";
+		default:
+			return "Unrecognized day";
 	}
 }
 
@@ -95,196 +114,101 @@ void handleStatus()
 		return server.requestAuthentication();
 	}
 
-	String message = "<!doctype html>";
-	message += "<html lang=\"en\">";
-	message += "<head>";
-	message += "<title>Status</title>";
-	message += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-	message += "<link href=\"https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T\" crossorigin=\"anonymous\">";
-	message += "</head>";
+	String html = R"V0G0N(
+<!doctype html>
+<head>
+	<title>Status</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+	</head>
+	<body>
+		<h1>Lamp</h1>
+		<form action="/toggle_lamp">
+			<input type="submit" class="btn btn-warning" style="display: block; margin: auto;" value=")V0G0N";
+	html += (lampEnabled ? "Turn light off" : "Turn light on");
+	html += R"V0G0N(">
+		</form>
 
-	message += "<body>";
+		<h1>Alarms</h1>
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Day</th>
+					<th>Time</th>
+					<th>Set new</th>
+					<th>Reset</th>
+				</tr>
+			</thead>
+			<tbody>)V0G0N";
 
-	message += "<h1>Lamp</h1>";
-	message += "<form action=\"/toggle_lamp\">";
-	message += "<input type=\"submit\" class=\"btn btn-warning\" style=\"display: block; margin: auto;\" value=\"";
-	message += lampEnabled ? "Turn light off" : "Turn light on";
-	message += "\"></form>";
+	for(int day = 0 ; day < 7 ; day++)
+	{
+		int timeTarget = timeTargets[day];
+		html += R"V0G0N(
+				<tr>
+					<td>)V0G0N";
+		html += formatDay(day);
+		html += R"V0G0N(</td>
+					<td>)V0G0N";
+	
+		html += formatTime(timeTarget);
 
-	message += "<h1>Alarms</h1>";
-	message += "<table class=\"table\">";
-	message += "<thead>";
-	message += "<tr>";
-	message += "<th>Day</th>";
-	message += "<th>Time</th>";
-	message += "<th>Set new</th>";
-	message += "</tr>";
-	message += "</thead>";
-
-	message += "<tbody>";
-	message += "<tr>";
-	//Day
-	message += "<td>Monday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetMonday / 3600;
-	message += ":";
-	message += (timeTargetMonday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"1\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Tuesday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetTuesday / 3600;
-	message += ":";
-	message += (timeTargetTuesday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"2\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Wednesday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetWednesday / 3600;
-	message += ":";
-	message += (timeTargetWednesday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"3\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Thursday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetThursday / 3600;
-	message += ":";
-	message += (timeTargetThursday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"4\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Friday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetFriday / 3600;
-	message += ":";
-	message += (timeTargetFriday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"5\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Saturday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetSaturday / 3600;
-	message += ":";
-	message += (timeTargetSaturday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"6\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-
-	message += "<tr>";
-	//Day
-	message += "<td>Sunday</td>";
-	//Time
-	message += "<td>";
-	message += timeTargetSunday / 3600;
-	message += ":";
-	message += (timeTargetSunday % 3600) / 60;
-	message += "</td>";
-	//Time picker
-	message += "<td>";
-	message += "<form action=\"/update_clock\">";
-	message += "<input type=\"hidden\" name=\"day\" value=\"7\">";
-	message += "<input type=\"time\" name=\"new_time\">";
-	message += "<input type=\"submit\" class=\"btn btn-primary\"></form>";
-	message += "</td>";
-	message += "</tr>";
-	message += "</tbody>";
-
-	message += "</table>";
-
-	message += "<h1>Status</h1>";
-
-	message += "<table class=\"table\">";
-	message += "<thead>";
-	message += "<tr>";
-	message += "<th>Time</th>";
-	message += "<th>Alarm at</th>";
-	message += "<th>Time remaining</th>";
-	message += "</tr>";
-	message += "</thead>";
-
-	message += "<tbody>";
-	message += "<tr>";
-
-	message += "<td>";
-	message += timeClient.getFormattedTime();
-	message += "</td>";
-	message += "<td>";
-	message += nextAlarm() / 3600;
-	message += ":";
-	message += (nextAlarm() % 3600) / 60;
-	message += "</td>";
-	message += "<td>";
-	message += nextAlarm() - currentTimeMoment();
-	message += "</td>";
-
-	message += "</tr>";
-	message += "</tbody>";
-	message += "</table>";
-
-	message += "</body>";
-	message += "</html>";
-
-	server.send(200, "text/html", message);
+		html += R"V0G0N(</td>
+					<td>
+						<form action="/update_clock">
+							<input type="hidden" name="day" value=")V0G0N";
+		html += day;
+		html += R"V0G0N(">
+							<input type="time" name="new_time">
+							<input type="submit" class="btn btn-primary" value="Update">
+						</form>
+					</td>
+					<td>
+						<form action="/remove_clock">
+							<input type="hidden" name="day" value=")V0G0N";
+		html += day;
+		html += R"V0G0N(">
+							<input type="submit" class="btn btn-danger" value="Reset">
+						</form>
+					</td>
+				</tr>)V0G0N";
+	}
+		
+	html += R"V0G0N(
+				</tbody>
+		</table>
+		<h1>Status</h1>
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Time</th>
+					<th>Alarm at</th>
+					<th>Time remaining</th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr>
+					<td>
+						)V0G0N";
+	html += timeClient.getFormattedTime();
+	html += R"V0G0N(
+					</td>
+					<td>
+						)V0G0N";
+	html += formatTime(nextAlarm());
+	html += R"V0G0N(
+					</td>
+					<td>
+						)V0G0N";
+	html += nextAlarm() - currentTimeMoment();
+	html += R"V0G0N(
+					</td>
+				</tr>
+			</tbody>
+		</table>
+	</body>
+</html>)V0G0N";
+	server.send(200, "text/html", html);
 }
 
 void handleUpdateTime()
@@ -294,7 +218,7 @@ void handleUpdateTime()
 		return server.requestAuthentication();
 	}
 
-	int day = 0;
+	int day = -1;
 	String timeUnrefined;
 	int hour = 0;
 	int minute = 0;
@@ -313,7 +237,7 @@ void handleUpdateTime()
 		}
 	}
 
-	if (day == 0)
+	if (day == -1)
 	{
 		return server.send(400, "text/plain", "Day can't be null!");
 	}
@@ -329,32 +253,40 @@ void handleUpdateTime()
 
 	int newTarget = hour * 3600 + minute * 60;
 
-	switch (day)
-	{
-	case 1:
-		timeTargetMonday = newTarget;
-		break;
-	case 2:
-		timeTargetTuesday = newTarget;
-		break;
-	case 3:
-		timeTargetWednesday = newTarget;
-		break;
-	case 4:
-		timeTargetThursday = newTarget;
-		break;
-	case 5:
-		timeTargetFriday = newTarget;
-		break;
-	case 6:
-		timeTargetSaturday = newTarget;
-		break;
-	case 7:
-		timeTargetSunday = newTarget;
-		break;
-	}
+	timeTargets[day] = newTarget;
 
 	server.sendHeader("Location", "/status");
+	server.sendHeader("Cache-Control", "max-age=1");
+	server.send(301);
+}
+
+void handleRemoveTime()
+{
+	if (!server.authenticate(auth_username, auth_password))
+	{
+		return server.requestAuthentication();
+	}
+
+	int day = -1;
+
+	for (uint8_t i = 0; i < server.args(); i++)
+	{
+		if (server.argName(i).equalsIgnoreCase("day"))
+		{
+			String inputDay = server.arg(i);
+			day = inputDay.toInt();
+		}
+	}
+
+	if (day == -1)
+	{
+		return server.send(400, "text/plain", "Day can't be null!");
+	}
+
+	timeTargets[day] = 0;
+
+	server.sendHeader("Location", "/status");
+	server.sendHeader("Cache-Control", "max-age=1");
 	server.send(301);
 }
 
@@ -363,7 +295,8 @@ void handleToggleLamp()
 	Serial.println("Swapping lamp status");
 	lampEnabled = !lampEnabled;
 	server.sendHeader("Location", "/status");
-	server.send(307);
+	server.sendHeader("Cache-Control", "max-age=1");
+	server.send(301);
 }
 
 void startWifi()
@@ -379,7 +312,7 @@ void startWifi()
 	WiFi.mode(WIFI_STA);
 	WiFi.hostname(device_name);
 
-		// Wait for connection
+	// Wait for connection
 	while (WiFi.status() != WL_CONNECTED)
 	{
 		delay(500);
@@ -405,19 +338,25 @@ void stopWifi()
 
 void setup(void)
 {
+	for(int i = 0 ; i < 7 ; i++)
+	{
+		timeTargets[i] = 0;
+	}
+
 	Serial.begin(9600);
 	Serial.println("");
 
 	startWifi();
 
 	server.on("/update_clock", handleUpdateTime);
+	server.on("/remove_clock", handleRemoveTime);
 	server.on("/toggle_lamp", handleToggleLamp);
 	server.on("/status", handleStatus);
 
 	server.begin();
 	Serial.println("HTTP server started");
 
-		timeClient.begin();
+	timeClient.begin();
 	Serial.println("Time client started");
 
 	timeClient.update();
@@ -502,7 +441,7 @@ void loop(void)
 			tickLight();
 	}
 
-	if (wifiRestarter > 43200000)
+	if (wifiRestarter > 8640000)
 	{
 		wifiRestarter = 0;
 		stopWifi();
